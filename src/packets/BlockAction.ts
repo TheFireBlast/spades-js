@@ -3,7 +3,6 @@ import { Vec3 } from "../Vec3";
 import { PacketType } from "../enums";
 import { Player, ToolType } from "../Player";
 import { BufferCursor } from "../BufferCursor";
-import { PacketManager } from "../PacketManager";
 
 export enum BlockActionType {
     Place,
@@ -45,7 +44,7 @@ export function receiveBlockAction(server: Server, sender: Player, cursor: Buffe
         console.log(
             `${sender} may be using BlockExploit with Item: ${ToolType[sender.item]} and Action: ${
                 BlockActionType[actionType]
-            }`
+            }`,
         );
         return;
     }
@@ -66,26 +65,10 @@ export function receiveBlockAction(server: Server, sender: Player, cursor: Buffe
     switch (actionType) {
         case BlockActionType.Place: {
             server.map.data.set_block(X, Y, Z, 1);
-            server.map.data.set_color(X, Y, Z, sender.blockColor.raw());
+            server.map.data.set_color(X, Y, Z, sender.blockColor.getARGB());
             sender.blocks--;
-            // moveIntelAndTentUp(server);
+            // server.updateCTFObjects();
             server.broadcast(makeBlockAction(sender, actionType, blockPos));
-
-            // if (gamemode_block_checks(server, X, Y, Z)) {
-            //     uint64_t timeNow = get_nanos();
-            //     if (sender.blocks > 0 &&
-            //         diff_is_older_then(timeNow, &sender.timers.since_last_block_plac, BLOCK_DELAY) &&
-            //         diff_is_older_then_dont_update(
-            //         timeNow, sender.timers.since_last_block_dest, BLOCK_DELAY) &&
-            //         diff_is_older_then_dont_update(
-            //         timeNow, sender.timers.since_last_3block_dest, BLOCK_DELAY))
-            //     {
-            //         mapvxl_set_color(&server.s_map.map, X, Y, Z, sender.tool_color.raw);
-            //         sender.blocks--;
-            //         moveIntelAndTentUp(server);
-            //         send_block_action(server, sender, actionType, X, Y, Z);
-            //     }
-            // }
             break;
         }
 

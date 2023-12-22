@@ -3,7 +3,7 @@ import { Player, PlayerState } from "./Player";
 import { MapInfo, SpadesMap } from "./Map";
 import { Color } from "./Color";
 import { BufferCursor } from "./BufferCursor";
-import { PacketManager } from "./PacketManager";
+import { PacketManager, registerV0_75 } from "./PacketManager";
 import { ProtocolVersion, DisconnectReason, TeamId, GamemodeType, IntelFlag, PacketType } from "./enums";
 import { Vec3 } from "./Vec3";
 import { Volume } from "./Volume";
@@ -22,6 +22,7 @@ export class Gamemode {
 
 export class Server {
     host: enet.Host;
+    packetManager: PacketManager;
     players: Player[] = [];
     map: SpadesMap;
     fogColor: Color = new Color(128, 232, 255);
@@ -43,6 +44,9 @@ export class Server {
         console.log("loading map");
         this.map = SpadesMap.from_options(new MapInfo("Border_Hallway.vxl", 512, 512, 64));
         console.log("map loaded");
+
+        this.packetManager = new PacketManager();
+        registerV0_75(this.packetManager);
 
         this.host = enet.createServer(
             {
@@ -92,7 +96,7 @@ export class Server {
                             let packetId = packetData[0];
                             let cursor = new BufferCursor(packetData);
                             cursor.skip(1);
-                            if (!PacketManager.handle(packetId, this, player, cursor)) {
+                            if (!this.packetManager.handle(packetId, this, player, cursor)) {
                                 let packetName = PacketType[packetId];
                                 if (packetName) {
                                     console.log(`[${player}] no handler for ${packetName}`, packetData);
@@ -103,14 +107,16 @@ export class Server {
                         });
                     } else {
                         console.log(
-                            `Player (${peer.address().address}) tried joining with unsupported protocol version ${data}`
+                            `Player (${
+                                peer.address().address
+                            }) tried joining with unsupported protocol version ${data}`,
                         );
                         peer.disconnectNow(DisconnectReason.WrongProtocolVersion);
                     }
                 });
 
                 host.start();
-            }
+            },
         );
     }
 
@@ -157,7 +163,7 @@ export class Server {
     broadcastFilter(
         data: enet.Packet | Buffer | BufferCursor,
         filter: (player: Player) => boolean,
-        flags?: enet.PacketFlag
+        flags?: enet.PacketFlag,
     ): boolean {
         if (this.players.length == 0) return false;
 

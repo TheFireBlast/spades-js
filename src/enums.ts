@@ -58,6 +58,7 @@ export enum GamemodeType {
     TC = 1,
 }
 export enum IntelFlag {
+    None = 0b00,
     TeamA = 0b01,
     TeamB = 0b10,
     BothTeams = 0b11,

@@ -181,8 +181,8 @@ export class Player {
                 let compressed = Buffer.from(pako.deflate(data, { level: 9 }));
                 console.log(
                     `deflating done (${compressed.length} bytes) ${((compressed.length / data.length) * 100).toFixed(
-                        2
-                    )}%`
+                        2,
+                    )}%`,
                 );
                 console.log(`sending ${Math.ceil(compressed.length / 8192)} chunks to ${player}`);
 

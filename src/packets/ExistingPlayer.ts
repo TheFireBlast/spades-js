@@ -18,7 +18,7 @@ export function makeExistingPlayer(server: Server, existingPlayer: Player) {
 }
 
 export function receiveExistingPlayer(server: Server, sender: Player, cursor: BufferCursor) {
-    cursor.skip(1); // Clients always send a "dumb" ID here since server has not sent them their ID yet
+    cursor.skip(1); // player id, don't use
     sender.team = cursor.readUInt8();
     sender.weapon = cursor.readUInt8();
     sender.item = cursor.readUInt8();

@@ -9,7 +9,7 @@ export class Color {
         this.b = b;
         this.a = a;
     }
-    raw() {
+    getARGB() {
         const { a, r, g, b } = this;
         return (a << 24) | (r << 16) | (g << 8) | (b << 0);
     }

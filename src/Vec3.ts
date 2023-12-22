@@ -1,5 +1,9 @@
 export class Vec3 {
-    constructor(public x = 0, public y = 0, public z = 0) {}
+    constructor(
+        public x = 0,
+        public y = 0,
+        public z = 0,
+    ) {}
     len() {
         return Math.sqrt(this.x ** 2 + this.y ** 2 + this.z ** 2);
     }
@@ -24,6 +28,6 @@ export class Vec3 {
         return new Vec3(this.x, this.y, this.z);
     }
     toString() {
-        return `Vec3{${this.x}, ${this.y}, ${this.z}}`;
+        return `Vec3{${+this.x.toFixed(2)}, ${+this.y.toFixed(2)}, ${+this.z.toFixed(2)}}`;
     }
 }
