@@ -10,7 +10,10 @@
             "name": "Launch Server",
             "skipFiles": ["<node_internals>/**"],
             "args": "${workspaceFolder}/src/index.ts",
-            "runtimeArgs": ["-r", "ts-node/register"]
+            "runtimeArgs": ["-r", "ts-node/register"],
+            "env": {
+                "HMR": "true"
+            }
         }
     ]
 }

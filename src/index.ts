@@ -5,7 +5,8 @@ declare global {
     let TEST_SERVER: Server;
 }
 
-process.env.HMR = "true";
+if (process.argv.includes("--HMR")) process.env.HMR = "true";
+
 let server = new Server(9001);
 (global as any).TEST_SERVER = server;
 server.start();
@@ -15,6 +16,14 @@ process.on("SIGINT", async () => {
     await server.stop();
     process.exit(0);
 });
+
+if (process.env.HMR == "true") {
+    useHMR("./Server", ["Server"]);
+    useHMR("./Player", ["Player"]);
+    useHMR("./Map", ["SpadesMap"]);
+    useHMR("./Color", ["Color"]);
+    useHMR("./BufferCursor", ["BufferCursor"]);
+}
 
 //TODO: support exported functions or turn packets into classes
 //TODO: also reload nested imports
@@ -50,9 +59,3 @@ async function useHMR(path: string, exports: string[]) {
         }
     });
 }
-
-useHMR("./Server", ["Server"]);
-useHMR("./Player", ["Player"]);
-useHMR("./Map", ["SpadesMap"]);
-useHMR("./Color", ["Color"]);
-useHMR("./BufferCursor", ["BufferCursor"]);
