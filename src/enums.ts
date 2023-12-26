@@ -22,7 +22,7 @@ export enum PacketType {
     SetTool = 7,
     SetColor = 8,
     ExistingPlayer = 9,
-    ShortPlayerDATA = 10,
+    ShortPlayerData = 10,
     MoveObject = 11,
     CreatePlayer = 12,
     BlockAction = 13,
@@ -62,4 +62,19 @@ export enum IntelFlag {
     TeamA = 0b01,
     TeamB = 0b10,
     BothTeams = 0b11,
+}
+
+export enum HealthUpdateType {
+    Fall = 0,
+    Weapon = 1,
+}
+
+export enum KillType {
+    Weapon = 0, // body, limbs
+    HeadShot = 1,
+    Melee = 2, // spade
+    Grenade = 3,
+    Fall = 4,
+    TeamChange = 5,
+    ClassChange = 6,
 }

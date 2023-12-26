@@ -11,27 +11,24 @@ export enum BlockActionType {
     Explode,
 }
 
-export function makeBlockAction(agent: Player, actionType: BlockActionType, blockPos: Vec3) {
+export function make(agent: Player, actionType: BlockActionType, blockPos: Vec3) {
     let cursor = BufferCursor.alloc(15);
     cursor.writeUInt8(PacketType.BlockAction);
     cursor.writeUInt8(agent.id);
     cursor.writeUInt8(actionType);
-    cursor.writeUInt32(blockPos.x);
-    cursor.writeUInt32(blockPos.y);
-    cursor.writeUInt32(blockPos.z);
+    cursor.writeVec3u32(blockPos);
     return cursor.buffer;
 }
 
-export function receiveBlockAction(server: Server, sender: Player, cursor: BufferCursor) {
+export function handle(server: Server, sender: Player, cursor: BufferCursor) {
     if (sender.sprinting) return;
-    cursor.readUInt8(); // received player id, don't use
-    let actionType = cursor.readUInt8();
-    const X = cursor.readUInt32();
-    const Y = cursor.readUInt32();
-    const Z = cursor.readUInt32();
-    let blockPos = new Vec3(X, Y, Z);
-    //TODO: validate pos
-    console.log(`${sender} sent BlockAction{${BlockActionType[actionType]} with ${ToolType[sender.item]}}`);
+    cursor.skip(1); // player id, don't use
+    const actionType = cursor.readUInt8();
+    const blockPos = cursor.readVec3u32();
+
+    console.log(`${sender} sent BlockAction{${BlockActionType[actionType]} with ${ToolType[sender.item]}} at ${blockPos}`);
+
+    if (!server.map.isValidPos(blockPos)) return;
 
     if (
         !(
@@ -49,7 +46,7 @@ export function receiveBlockAction(server: Server, sender: Player, cursor: Buffe
         return;
     }
 
-    if (!((blockPos.dist(sender.movement.position) <= 4 || sender.item == 2) && server.map.isValidPos(blockPos))) {
+    if (!(blockPos.dist(sender.movement.position) <= 4 || sender.item == 2)) {
         console.log("block action", {
             playerPos: sender.movement.position.toString(),
             blockPos: blockPos.toString(),
@@ -64,36 +61,32 @@ export function receiveBlockAction(server: Server, sender: Player, cursor: Buffe
     //TODO: check timers
     switch (actionType) {
         case BlockActionType.Place: {
-            server.map.data.set_block(X, Y, Z, 1);
-            server.map.data.set_color(X, Y, Z, sender.blockColor.getARGB());
+            server.map._setBlock(blockPos, sender.blockColor);
             sender.blocks--;
             // server.updateCTFObjects();
-            server.broadcast(makeBlockAction(sender, actionType, blockPos));
+            server.broadcastMake(PacketType.BlockAction, sender, actionType, blockPos);
             break;
         }
 
         case BlockActionType.Break: {
-            //REM: Z < 62 ???
-            if (Z < 62) {
-                if (sender.item == ToolType.Gun) {
-                    //TODO: check ammo
-                }
-                if (sender.item == ToolType.Spade) {
-                    if (sender.blocks < 50) {
-                        sender.blocks++;
-                    }
-                }
-                server.map.data.set_air(blockPos.x, blockPos.y, blockPos.z);
-                //TODO: check for floating blocks
-                // vector3i_t* neighbors    = get_neighbours(blockPos);
-                // for (int i = 0; i < 6; ++i) {
-                //     if (neighbors[i].z < 62) {
-                //         check_node(server, neighbors[i]);
-                //     }
-                // }
-                let blockActionData = makeBlockAction(sender, actionType, blockPos);
-                server.broadcastFilter(blockActionData, (p) => p.isPastStateData());
+            if (sender.item == ToolType.Gun) {
+                //TODO: check ammo
             }
+            if (sender.item == ToolType.Spade) {
+                if (sender.blocks < 50) {
+                    sender.blocks++;
+                }
+            }
+            server.map.data.set_air(blockPos.x, blockPos.y, blockPos.z);
+            server.map.updateBlockBreak(blockPos);
+
+            server.broadcastMakeFilter(
+                PacketType.BlockAction,
+                (p) => p.isPastStateData(),
+                sender,
+                actionType,
+                blockPos,
+            );
             break;
         }
 

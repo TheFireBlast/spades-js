@@ -3,11 +3,15 @@ import { Player, PlayerState } from "./Player";
 import { MapInfo, SpadesMap } from "./Map";
 import { Color } from "./Color";
 import { BufferCursor } from "./BufferCursor";
-import { PacketManager, registerV0_75 } from "./PacketManager";
+import { Packet, PacketMaker, PacketManager, Packets0_75, registerV0_75 } from "./PacketManager";
 import { ProtocolVersion, DisconnectReason, TeamId, GamemodeType, IntelFlag, PacketType } from "./enums";
 import { Vec3 } from "./Vec3";
 import { Volume } from "./Volume";
-import { makeWorldUpdate } from "./packets/WorldUpdate";
+import * as WorldUpdate from "./packets/WorldUpdate";
+import { getPackedSettings } from "http2";
+import { ChatType } from "./packets/ChatMessage";
+import { aosAddressFromIPV4 } from "./util";
+import { BlockActionType } from "./packets/BlockAction";
 
 export class Gamemode {
     id: GamemodeType = GamemodeType.CTF;
@@ -21,8 +25,8 @@ export class Gamemode {
 }
 
 export class Server {
-    host: enet.Host;
-    packetManager: PacketManager;
+    host?: enet.Host;
+    packets: PacketManager<Packets0_75>;
     players: Player[] = [];
     map: SpadesMap;
     fogColor: Color = new Color(128, 232, 255);
@@ -30,11 +34,16 @@ export class Server {
     teamNames: [string, string] = ["RED", "BLU"];
     gamemode: Gamemode = new Gamemode();
     spawns: [Volume, Volume];
+    updateInterval: NodeJS.Timeout | undefined;
 
-    constructor(port: number) {
+    constructor(public port: number) {
+        if (process.env.HMR == "true") {
+            console.log("HMR Enabled");
+        }
+
         this.spawns = [
-            new Volume(new Vec3(64, 233, 0), new Vec3(188, 287, 0)),
-            new Volume(new Vec3(393, 225, 0), new Vec3(447, 278, 0)),
+            new Volume(new Vec3(67, 238, 61), new Vec3(116, 273, 61)),
+            new Volume(new Vec3(445, 238, 61), new Vec3(396, 273, 61)),
         ];
         for (let i = 0; i < 32; i++) {
             this.players[i] = new Player(i);
@@ -42,82 +51,106 @@ export class Server {
 
         //TODO: use thread to parse vxlmap file
         console.log("loading map");
-        this.map = SpadesMap.from_options(new MapInfo("Border_Hallway.vxl", 512, 512, 64));
+        this.map = SpadesMap.fromOptionsSync(new MapInfo("Border_Hallway.vxl", 512, 512, 64));
         console.log("map loaded");
 
-        this.packetManager = new PacketManager();
-        registerV0_75(this.packetManager);
+        this.packets = new PacketManager();
+        registerV0_75(this.packets);
+    }
 
-        this.host = enet.createServer(
-            {
-                address: {
-                    address: "0.0.0.0",
-                    port: port,
+    start(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            this.host = enet.createServer(
+                {
+                    address: {
+                        address: "0.0.0.0",
+                        port: this.port,
+                    },
+                    peers: 32,
+                    channels: 1,
+                    down: 0,
+                    up: 0,
                 },
-                peers: 32,
-                channels: 1,
-                down: 0,
-                up: 0,
-            },
 
-            (err, host) => {
-                if (err) {
-                    console.log(err);
-                    return;
-                }
-                host.enableCompression();
-
-                let host_addr = host.address();
-                console.log(`host ready on aos://16777343:${host_addr.port}`);
-
-                setInterval(this.update.bind(this), 1000 / 60);
-
-                //TODO: disconnect players on server stop (SIGINT etc)
-                host.on("connect", (peer, data) => {
-                    if (data == ProtocolVersion.Version_0_75) {
-                        const player = this.getFreePlayer();
-                        if (!player) {
-                            console.log(`Player (${peer.address().address}) tried joining but the server is full`);
-                            peer.disconnectNow(DisconnectReason.ServerFull);
-                            return;
-                        }
-                        console.log(`${player.toStringWithIp()} connected`);
-                        player.peer = peer;
-                        player.state = PlayerState.WaitingForMap;
-                        peer.on("disconnect", function () {
-                            console.log(`${player} disconnected`);
-                            // player.state = PlayerState.Disconnected;
-                            // player.peer = undefined;
-                            // player.mapGenerator = undefined;
-                            player.reset();
-                        });
-                        peer.on("message", (packet, channel) => {
-                            let packetData = packet.data();
-                            let packetId = packetData[0];
-                            let cursor = new BufferCursor(packetData);
-                            cursor.skip(1);
-                            if (!this.packetManager.handle(packetId, this, player, cursor)) {
-                                let packetName = PacketType[packetId];
-                                if (packetName) {
-                                    console.log(`[${player}] no handler for ${packetName}`, packetData);
-                                } else {
-                                    console.log(`[${player}] no handler for packet id ${packetId}`, packetData);
-                                }
-                            }
-                        });
-                    } else {
-                        console.log(
-                            `Player (${
-                                peer.address().address
-                            }) tried joining with unsupported protocol version ${data}`,
-                        );
-                        peer.disconnectNow(DisconnectReason.WrongProtocolVersion);
+                (err, host) => {
+                    if (err) {
+                        console.log(err);
+                        return;
                     }
-                });
+                    host.enableCompression();
 
-                host.start();
-            },
-        );
+                    let host_addr = host.address();
+                    console.log(`host ready on aos://${aosAddressFromIPV4("127.0.0.1")}:${host_addr.port}`);
+
+                    this.updateInterval = setInterval(() => this.update(), 1000 / 60);
+
+                    //TODO: disconnect players on server stop (SIGINT etc)
+                    host.on("connect", (peer, data) => this.onPlayerConnect(peer, data));
+
+                    host.start();
+                    resolve();
+                },
+            );
+        });
+    }
+
+    stop(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            if (!this.host) return resolve();
+            for (const p of this.players) {
+                if (p.state >= PlayerState.WaitingForMap) {
+                    this.disconnect(p, undefined, false);
+                }
+            }
+            this.host.once("destroy", () => resolve());
+            this.host.destroy();
+        });
+    }
+
+    onPlayerConnect(peer: enet.Peer, data: any) {
+        this.broadcast(this.packets.make(PacketType.ChatMessage, 0, ChatType.All, "player is trying to join"));
+        if (data == ProtocolVersion.Version_0_75) {
+            const player = this.getFreePlayer();
+            if (!player) {
+                console.log(`Player (${peer.address().address}) tried joining but the server is full`);
+                peer.disconnectNow(DisconnectReason.ServerFull);
+                return;
+            }
+            console.log(`${player.toStringWithIp()} connected`);
+            player.peer = peer;
+            player.state = PlayerState.WaitingForMap;
+            //TODO: store block update while player is downloading map
+            peer.on("disconnect", () => this.onPlayerDisconnect(player));
+            peer.on("message", (packet, channel) => this.onPlayerPacket(player, packet));
+        } else {
+            console.log(`Player (${peer.address().address}) tried joining with unsupported protocol version ${data}`);
+            peer.disconnectNow(DisconnectReason.WrongProtocolVersion);
+        }
+    }
+    onPlayerDisconnect(player: Player) {
+        console.log(`${player} disconnected`);
+        this.disconnect(player);
+    }
+    onPlayerPacket(player: Player, packet: enet.Packet) {
+        let packetData = packet.data();
+        let packetId = packetData[0];
+        let cursor = new BufferCursor(packetData);
+        cursor.skip(1);
+        if (!this.packets.handle(packetId, this, player, cursor)) {
+            let packetName = PacketType[packetId];
+            if (packetName) {
+                console.log(`[${player}] no handler for ${packetName}`, packetData);
+            } else {
+                console.log(`[${player}] no handler for packet id ${packetId}`, packetData);
+            }
+        }
+    }
+
+    disconnect(player: Player, reason?: DisconnectReason, broadcast: boolean = true) {
+        if (broadcast && player.isPastJoinScreen())
+            this.broadcastFilter(this.packets.make(PacketType.PlayerLeft, player), (p) => p != player);
+        player.peer?.disconnect(reason);
+        player.reset();
     }
 
     update() {
@@ -129,15 +162,29 @@ export class Server {
             if (player.state != PlayerState.Disconnected) {
                 player.update(this);
                 if (player.isPastJoinScreen()) {
-                    let time = Date.now();
-                    if (time - player.timers.worldUpdate >= 1000 / player.updatesPerSecond) {
-                        let worldUpdateData = makeWorldUpdate(this);
+                    if (player.timers.worldUpdate.use()) {
+                        let worldUpdateData = WorldUpdate.make(this);
                         player.send(worldUpdateData);
-                        player.timers.worldUpdate = time;
                     }
                 }
             }
         }
+    }
+
+    broadcastMake<P = typeof this.packets.packets, K extends keyof P = keyof P>(
+        id: K extends keyof P ? K : never,
+        ...args: P[K] extends Packet ? (P[K]["make"] extends PacketMaker ? Parameters<P[K]["make"]> : never) : never
+    ): boolean {
+        //@ts-expect-error
+        return this.broadcast(this.packets.make(id, ...args));
+    }
+    broadcastMakeFilter<P = typeof this.packets.packets, K extends keyof P = keyof P>(
+        id: K extends keyof P ? K : never,
+        filter: (player: Player) => boolean,
+        ...args: P[K] extends Packet ? (P[K]["make"] extends PacketMaker ? Parameters<P[K]["make"]> : never) : never
+    ): boolean {
+        //@ts-expect-error
+        return this.broadcastFilter(this.packets.make(id, ...args), filter);
     }
 
     broadcast(packet: enet.Packet): boolean;
@@ -181,27 +228,67 @@ export class Server {
         return true;
     }
 
-    setPlayerRespawnPoint(player: Player) {
-        if (player.team != TeamId.Spectator) {
-            let spawn: Volume = this.spawns[player.team];
-
-            let dx: number = spawn.to.x - spawn.from.x;
-            let dy: number = spawn.to.y - spawn.from.y;
-
-            player.movement.position.x = spawn.from.x + dx * Math.random();
-            player.movement.position.y = spawn.from.y + dy * Math.random();
-            player.movement.position.z =
-                this.map.findTopBlock(player.movement.position.x, player.movement.position.y) - 2.36;
-
-            player.movement.forward_orientation.x = 0;
-            player.movement.forward_orientation.y = 0;
-            player.movement.forward_orientation.z = 0;
-        }
-    }
-
     getFreePlayer() {
         for (let p of this.players) {
             if (p.state == PlayerState.Disconnected) return p;
         }
+    }
+
+    private _getDummyScore(p: Player) {
+        let score = 0;
+        if (p.state == PlayerState.Disconnected) return Infinity;
+        if (!p.alive) score += 1;
+        if (!p.isPastJoinScreen()) score += 1;
+        return score;
+    }
+    getDummyPlayers() {
+        let p1!: Player;
+        let p2!: Player;
+        let best1: number = 0;
+        let best2: number = 0;
+
+        for (const p of this.players) {
+            let score = this._getDummyScore(p);
+            if (score == Infinity) {
+                p1 = p2 = p;
+                break;
+            }
+            if (score >= best2) {
+                if (score >= best1) {
+                    p2 = p1;
+                    best2 = best1;
+                    p1 = p;
+                    best1 = score;
+                } else {
+                    p2 = p;
+                    best2 = score;
+                }
+            }
+        }
+
+        return [p1, p2];
+    }
+
+    setBlock(pos: Vec3, color?: Color) {
+        if (!color) return this.removeBlock(pos);
+        pos.floor();
+        if (!this.map.isValidPos(pos)) return;
+        this.map.data.set_block(pos.x, pos.y, pos.z, 1);
+        this.map.data.set_color(pos.x, pos.y, pos.z, color.getARGB());
+        let dummy = this.getDummyPlayers();
+        let _color = dummy[0].blockColor;
+        this.broadcast(this.packets.make(PacketType.SetColor, dummy[0], color));
+        this.broadcast(this.packets.make(PacketType.BlockAction, dummy[0], BlockActionType.Place, pos));
+        this.broadcast(this.packets.make(PacketType.SetColor, dummy[0], _color));
+        dummy[0].blockColor = _color;
+    }
+    removeBlock(pos: Vec3) {
+        pos.floor();
+        if (!this.map.isValidPos(pos)) return;
+        this.map.data.set_block(pos.x, pos.y, pos.z, 0);
+        let dummy = this.getDummyPlayers();
+        let _color = dummy[0].blockColor;
+        this.broadcast(this.packets.make(PacketType.BlockAction, dummy[0], BlockActionType.Break, pos));
+        dummy[0].blockColor = _color;
     }
 }

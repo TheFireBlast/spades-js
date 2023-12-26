@@ -3,7 +3,7 @@ import { PacketType } from "../enums";
 import { Player } from "../Player";
 import { BufferCursor } from "../BufferCursor";
 
-export function makeInputData(player: Player, input: number) {
+export function make(player: Player, input: number) {
     let cursor = BufferCursor.alloc(3);
     cursor.writeUInt8(PacketType.InputData);
     cursor.writeUInt8(player.id);
@@ -11,7 +11,7 @@ export function makeInputData(player: Player, input: number) {
     return cursor.buffer;
 }
 
-export function receiveInputData(server: Server, sender: Player, cursor: BufferCursor) {
+export function handle(server: Server, sender: Player, cursor: BufferCursor) {
     cursor.skip(1); // player id, don't use
     let input = cursor.readUInt8();
     let up = input & 0b00000001;
@@ -22,8 +22,9 @@ export function receiveInputData(server: Server, sender: Player, cursor: BufferC
     let crouch = input & 0b00100000;
     let sneak = input & 0b01000000;
     let sprint = input & 0b10000000;
-    //TODO
 
-    server.broadcastFilter(makeInputData(sender, input), (p) => p != sender);
+    //TODO: handle InputDataPacket
+
+    server.broadcastMakeFilter(PacketType.InputData, (p) => p != sender, sender, input);
     // console.log({ up, down, left, right, jump, crouch, sneak, sprint });
 }

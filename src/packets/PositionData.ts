@@ -4,9 +4,9 @@ import { PacketType } from "../enums";
 import { Player } from "../Player";
 import { BufferCursor } from "../BufferCursor";
 
-export function makePositionData(server: Server, position: Vec3) {}
+// export function make(server: Server, position: Vec3) {}
 
-export function receivePositionData(server: Server, sender: Player, cursor: BufferCursor) {
+export function handle(server: Server, sender: Player, cursor: BufferCursor) {
     let position = cursor.readVec3f();
     // console.log("pos", position);
     //TODO: add validation

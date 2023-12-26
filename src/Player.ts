@@ -1,17 +1,15 @@
-import fs from "fs";
-import crypto from "crypto";
-import enet from "enet";
-import pako from "pako";
+import * as fs from "fs";
+import * as crypto from "crypto";
+import * as enet from "enet";
+import * as pako from "pako";
 import { Server } from "./Server";
 import { Vec3 } from "./Vec3";
-import { PacketType } from "./enums";
+import { DisconnectReason, PacketType, TeamId } from "./enums";
 import { BufferCursor } from "./BufferCursor";
 import { Color } from "./Color";
-import { makeCreatePlayer } from "./packets/CreatePlayer";
-import { makeStateData } from "./packets/StateData";
-import { makeExistingPlayer } from "./packets/ExistingPlayer";
-import { makeVersionRequest } from "./packets/VersionInfo";
-import { ChatType, makeChatMessage } from "./packets/ChatMessage";
+import { ChatType } from "./packets/ChatMessage";
+import { Timer } from "./Timer";
+import { Volume } from "./Volume";
 
 export enum PlayerState {
     Disconnected,
@@ -23,7 +21,7 @@ export enum PlayerState {
     WaitingForRespawn,
     Ready,
 }
-//TODO: rename to ItemType?
+
 export enum ToolType {
     Spade,
     Block,
@@ -45,7 +43,17 @@ export class Player {
     mapGenerator: MapGenerator | undefined;
     updatesPerSecond!: number;
     team!: number;
-    weapon!: WeaponType;
+    private _weapon!: WeaponType;
+    public get weapon(): WeaponType {
+        return this._weapon;
+    }
+    public set weapon(value: WeaponType) {
+        this._weapon = value;
+        this.timers.weaponReload.delay = this.getWeaponReloadDelay();
+        this.timers.weaponReload.reset(0);
+        this.timers.weaponFire.delay = this.getWeaponFireDelay();
+        this.timers.weaponFire.reset(0);
+    }
     item!: ToolType;
     kills!: number;
     blockColor!: Color;
@@ -77,7 +85,9 @@ export class Player {
         previous_orientation: Vec3;
     };
     timers!: {
-        worldUpdate: number;
+        worldUpdate: Timer;
+        weaponReload: Timer;
+        weaponFire: Timer;
     };
 
     constructor(id: number) {
@@ -91,7 +101,7 @@ export class Player {
         this.mapGenerator = undefined;
         this.updatesPerSecond = 60;
         this.team = 0;
-        this.weapon = WeaponType.Rifle;
+        this._weapon = WeaponType.Rifle;
         this.item = ToolType.Gun;
         this.kills = 0;
         this.blockColor = new Color();
@@ -123,7 +133,9 @@ export class Player {
             previous_orientation: new Vec3(),
         };
         this.timers = {
-            worldUpdate: 0,
+            worldUpdate: new Timer(1000 / this.updatesPerSecond),
+            weaponReload: new Timer(this.getWeaponReloadDelay()),
+            weaponFire: new Timer(this.getWeaponFireDelay()),
         };
     }
 
@@ -150,24 +162,49 @@ export class Player {
     isPastJoinScreen() {
         return this.state > PlayerState.PickScreen;
     }
+    moveToSpawn(server: Server) {
+        if (this.team != TeamId.Spectator) {
+            let spawn: Volume = server.spawns[this.team];
+
+            let dx: number = spawn.to.x - spawn.from.x;
+            let dy: number = spawn.to.y - spawn.from.y;
+
+            this.movement.position.x = spawn.from.x + dx * Math.random();
+            this.movement.position.y = spawn.from.y + dy * Math.random();
+            this.movement.position.z =
+                server.map.findTopBlock(this.movement.position.x, this.movement.position.y) - 2.36;
+
+            this.movement.forward_orientation.x = 0;
+            this.movement.forward_orientation.y = 0;
+            this.movement.forward_orientation.z = 0;
+        }
+    }
     respawn(server: Server) {
-        let packetData = makeCreatePlayer(server, this);
+        let packetData = server.packets.make(PacketType.CreatePlayer, server, this);
         server.broadcastFilter(packetData, (p) => p.isPastStateData());
         this.state = PlayerState.Ready;
     }
-    toString() {
-        return `${this.name}#${this.id}`;
+    getWeaponFireDelay() {
+        return {
+            [WeaponType.Rifle]: 500,
+            [WeaponType.SMG]: 100,
+            [WeaponType.Shotgun]: 1000,
+        }[this.weapon];
     }
-    toStringWithIp() {
-        return `${this.name}(${this.getIp()})#${this.id}`;
-    }
-    getIp() {
-        return this.peer?.address().address;
+    getWeaponReloadDelay() {
+        return {
+            [WeaponType.Rifle]: 2500,
+            [WeaponType.SMG]: 2500,
+            [WeaponType.Shotgun]: 500,
+        }[this.weapon];
     }
 
     update(server: Server) {
         const player = this;
         switch (player.state) {
+            case PlayerState.Disconnected: {
+                break;
+            }
             case PlayerState.WaitingForMap: {
                 //TODO: accumulate packets until client is done loading map
                 console.log(`sending mapstart to ${player}`);
@@ -186,12 +223,7 @@ export class Player {
                 );
                 console.log(`sending ${Math.ceil(compressed.length / 8192)} chunks to ${player}`);
 
-                let buf = Buffer.alloc(5);
-                buf.writeUInt8(PacketType.MapStart, 0);
-                // buf.writeUInt32LE(1.5 * 1024 * 1024, 1);
-                buf.writeUInt32LE(compressed.length, 1);
-                let packet = new enet.Packet(buf, enet.PACKET_FLAG.RELIABLE);
-                if (player.send(packet)) {
+                if (player.send(server.packets.make(PacketType.MapStart, compressed.length))) {
                     player.mapGenerator = new MapGenerator(compressed);
                     player.state = PlayerState.LoadingChunks;
                 }
@@ -201,7 +233,7 @@ export class Player {
                 if (!player.mapGenerator) break;
                 if (player.mapGenerator.done()) {
                     console.log(`finished sending chunks to ${player}`);
-                    player.send(makeVersionRequest());
+                    player.send(server.packets.make(PacketType.VersionRequest));
                     player.state = PlayerState.Joining;
                     player.mapGenerator = undefined;
                     break;
@@ -212,19 +244,21 @@ export class Player {
                 // console.log(md5, player.map_generator.position, player.map_generator.left(), chunk.length);
                 // console.log(`sending chunk to ${player} (${chunk.length}) (${player.mapGenerator.left()} left)`);
 
-                let buf = Buffer.alloc(1 + chunk.length);
-                buf.writeUInt8(PacketType.MapChunk, 0);
-                chunk.copy(buf, 1);
-                let packet = new enet.Packet(buf, enet.PACKET_FLAG.RELIABLE);
-                player.send(packet);
+                player.send(server.packets.make(PacketType.MapChunk, chunk));
                 break;
             }
             case PlayerState.Joining: {
-                let existingPlayerPacketData = makeExistingPlayer(server, player);
-                server.broadcastFilter(existingPlayerPacketData, (p) => p != player && p.isPastStateData());
-                player.send(makeStateData(server, player));
+                for (const p of server.players) {
+                    if (p != player && p.isPastJoinScreen()) {
+                        player.send(server.packets.make(PacketType.ExistingPlayer, p));
+                    }
+                }
+                player.send(server.packets.make(PacketType.StateData, server, player));
                 console.log(`sent game state to ${player}`);
                 player.state = PlayerState.PickScreen;
+                break;
+            }
+            case PlayerState.PickScreen: {
                 break;
             }
             case PlayerState.Spawning: {
@@ -245,15 +279,31 @@ export class Player {
                 player.secondary_fire = false;
                 player.alive = true;
                 player.reloading = false;
-                server.setPlayerRespawnPoint(player);
+                this.moveToSpawn(server);
                 this.respawn(server);
                 console.log(`${player} spawning at ${player.movement.position}`);
                 break;
             }
+            case PlayerState.WaitingForRespawn: {
+                break;
+            }
+            case PlayerState.Ready: {
+                break;
+            }
             default: {
-                // console.log("unknown state", PlayerState[player.state])
+                console.log("unknown state", PlayerState[player.state]);
             }
         }
+    }
+
+    toString() {
+        return `${this.name}#${this.id}`;
+    }
+    toStringWithIp() {
+        return `${this.name}(${this.getIp()})#${this.id}`;
+    }
+    getIp() {
+        return this.peer?.address().address;
     }
 }
 

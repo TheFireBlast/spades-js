@@ -1,9 +1,9 @@
 {
     "compilerOptions": {
-        "moduleResolution": "node",
-        "lib": ["es2021"],
-        "target": "es2020",
-        "module": "commonjs",
+        "lib": ["ES2022"],
+        "target": "ES2022",
+        "module": "CommonJS",
+        "moduleResolution": "Node10",
         "inlineSourceMap": true,
         "outDir": "./dist",
         "esModuleInterop": true,
@@ -12,5 +12,11 @@
         "skipLibCheck": true,
         "typeRoots": ["src/custom_types", "node_modules/@types"]
     },
-    "include": ["src/**/*", "test/**/*"]
+    "include": ["src/**/*", "test/**/*"],
+    "exclude": ["node_modules"],
+    "ts-node": {
+        "swc": true
+        // "esm": true,
+        // "experimentalSpecifierResolution": "node"
+    }
 }

@@ -3,11 +3,11 @@ import { PacketType } from "../enums";
 import { Player } from "../Player";
 import { BufferCursor } from "../BufferCursor";
 
-export function makeVersionRequest() {
+export function make() {
     return Buffer.of(PacketType.VersionRequest);
 }
 
-export function receiveVersionInfo(server: Server, sender: Player, cursor: BufferCursor) {
+export function handle(server: Server, sender: Player, cursor: BufferCursor) {
     console.log("received version response");
     let client = cursor.readUInt8();
     let version_major = cursor.readUInt8();

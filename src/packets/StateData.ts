@@ -3,7 +3,7 @@ import { GamemodeType as GamemodeType, IntelFlag, PacketType } from "../enums";
 import { Player, PlayerState } from "../Player";
 import { BufferCursor } from "../BufferCursor";
 
-export function makeStateData(server: Server, player: Player) {
+export function make(server: Server, player: Player) {
     let cursor = BufferCursor.alloc(104);
 
     cursor.writeUInt8(PacketType.StateData);

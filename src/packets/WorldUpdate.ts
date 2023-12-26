@@ -4,7 +4,7 @@ import { PacketType } from "../enums";
 import { Player, PlayerState } from "../Player";
 import { BufferCursor } from "../BufferCursor";
 
-export function makeWorldUpdate(server: Server) {
+export function make(server: Server) {
     let cursor = BufferCursor.alloc(1 + 32 * 24);
     cursor.writeUInt8(PacketType.WorldUpdate);
     const zero = new Vec3();
@@ -20,4 +20,4 @@ export function makeWorldUpdate(server: Server) {
     return cursor.buffer;
 }
 
-// export function receiveWorldUpdate(server: Server, sender: Player, cursor: BufferCursor) { }
+// export function handle(server: Server, sender: Player, cursor: BufferCursor) { }

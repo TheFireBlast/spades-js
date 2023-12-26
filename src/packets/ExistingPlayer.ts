@@ -2,22 +2,22 @@ import { Server } from "../Server";
 import { PacketType, TeamId } from "../enums";
 import { Player, PlayerState } from "../Player";
 import { BufferCursor } from "../BufferCursor";
-import { ChatType, makeChatMessage } from "./ChatMessage";
+import { ChatType } from "./ChatMessage";
 
-export function makeExistingPlayer(server: Server, existingPlayer: Player) {
+export function make(player: Player) {
     let cursor = BufferCursor.alloc(28);
     cursor.writeUInt8(PacketType.ExistingPlayer);
-    cursor.writeUInt8(existingPlayer.id); // ID
-    cursor.writeUInt8(existingPlayer.team); // TEAM
-    cursor.writeUInt8(existingPlayer.weapon); // WEAPON
-    cursor.writeUInt8(existingPlayer.item); // HELD ITEM
-    cursor.writeUInt32(existingPlayer.kills); // KILLS
-    cursor.writeColorRGB(existingPlayer.blockColor); // COLOR
-    cursor.writeString(existingPlayer.name, 16); // NAME
+    cursor.writeUInt8(player.id); // ID
+    cursor.writeUInt8(player.team); // TEAM
+    cursor.writeUInt8(player.weapon); // WEAPON
+    cursor.writeUInt8(player.item); // HELD ITEM
+    cursor.writeUInt32(player.kills); // KILLS
+    cursor.writeColorRGB(player.blockColor); // COLOR
+    cursor.writeString(player.name, 16); // NAME
     return cursor.buffer;
 }
 
-export function receiveExistingPlayer(server: Server, sender: Player, cursor: BufferCursor) {
+export function handle(server: Server, sender: Player, cursor: BufferCursor) {
     cursor.skip(1); // player id, don't use
     sender.team = cursor.readUInt8();
     sender.weapon = cursor.readUInt8();
@@ -49,7 +49,7 @@ export function receiveExistingPlayer(server: Server, sender: Player, cursor: Bu
     //BUG: player team spectator undefined
     console.log(`${sender} joined ${server.teamNames[sender.team]}`);
     //TODO: put this broadcast in a better place
-    server.broadcast(makeChatMessage(0, ChatType.System, `Welcome, ${sender.name}!`));
+    server.broadcastMake(PacketType.ChatMessage, 0, ChatType.System, `Welcome, ${sender.name}!`);
 
     //TODO: send MoveObject packet for intels
 }
