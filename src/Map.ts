@@ -76,7 +76,7 @@ export class SpadesMap {
             undefined
         );
     }
-    _setBlock(pos: Vec3, color?: Color) {
+    _setBlock(pos: Vec3, color?: Color | undefined | false | 0) {
         if (color) {
             this.data.set_block(pos.x, pos.y, pos.z, 1);
             this.data.set_color(pos.x, pos.y, pos.z, color.getARGB());
@@ -84,7 +84,7 @@ export class SpadesMap {
             this.data.set_block(pos.x, pos.y, pos.z, 0);
         }
     }
-    setBlock(pos: Vec3, color?: Color) {
+    setBlock(pos: Vec3, color?: Color | undefined | false | 0) {
         if (!this.isValidPos(pos)) return;
         if (color) {
             this.data.set_block(pos.x, pos.y, pos.z, 1);
